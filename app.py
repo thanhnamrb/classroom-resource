@@ -28,7 +28,7 @@ def get_google_sheet():
     client = gspread.authorize(creds)
     
     # THAY LINK GOOGLE SHEETS CỦA BẠN VÀO ĐÂY
-    sheet_url = "https://docs.google.com/spreadsheets/d/ID_FILE_SHEETS_CUA_BAN/edit"
+    sheet_url = "https://docs.google.com/spreadsheets/d/1jw0qbjaTl9PqjR_cqncSBOXdsDezlNx86cRrBo8aG0U/edit?gid=0#gid=0"
     return client.open_by_url(sheet_url).sheet1
 
 sheet = get_google_sheet()
@@ -78,7 +78,7 @@ st.write("Vui lòng chọn tên để bắt đầu. **Lưu ý: Chỉ được ng
 chon_ten = st.selectbox("👤 Chọn tên:", ["-- Chọn tên --"] + hoc_sinh_chua_nghe)
 
 # THAY LINK DRIVE CHỨA FILE AUDIO CỦA BẠN VÀO ĐÂY
-link_goc_drive = "https://docs.google.com/spreadsheets/d/1jw0qbjaTl9PqjR_cqncSBOXdsDezlNx86cRrBo8aG0U/edit?usp=sharing"
+link_goc_drive = ""
 direct_link = get_drive_direct_link(link_goc_drive)
 
 # --- XỬ LÝ LOGIC TRỪ LƯỢT VĨNH VIỄN ---
