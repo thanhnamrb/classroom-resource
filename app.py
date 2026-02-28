@@ -4,9 +4,10 @@ import gspread
 import requests
 import base64
 import json
+from datetime import datetime
 from google.oauth2.service_account import Credentials
 
-st.set_page_config(page_title="Hệ thống Luyện nghe Chuyên sâu", layout="centered")
+st.set_page_config(page_title="Hệ thống Khảo thí Tiếng Anh", layout="centered")
 
 # --- KẾT NỐI GOOGLE SHEETS ---
 @st.cache_resource
@@ -22,133 +23,134 @@ sheet_data = gc.sheet1
 sheet_settings = gc.worksheet("Settings")
 settings_raw = sheet_settings.get_all_values()
 
-# Đọc cấu hình
-links_raw = settings_raw[0][1] if len(settings_raw) > 0 else ""
-links = [l.strip() for l in links_raw.split(",") if l.strip()]
-interval = int(settings_raw[2][1]) if len(settings_raw) > 2 else 10
-admin_pw = settings_raw[3][1] if len(settings_raw) > 3 else "Nam2026"
+# --- ĐỌC CẤU HÌNH SÂU ---
+def safe_get(r, default):
+    try: return settings_raw[r][1]
+    except: return default
+
+config = {
+    "links": [l.strip() for l in safe_get(0, "").split(",") if l.strip()],
+    "speeds": [float(s.strip()) for s in safe_get(1, "1.0").split(",") if s.strip()],
+    "intervals": [int(i.strip()) for i in safe_get(2, "10").split(",") if i.strip()],
+    "max_repeats": int(safe_get(3, 1)),
+    "deadline": safe_get(4, "2099-12-31 23:59"),
+    "admin_pw": safe_get(5, "Nam2026")
+}
 
 def get_audio_b64(url):
     try:
         f_id = url.split("/d/")[1].split("/")[0]
         d_url = f"https://drive.google.com/uc?export=download&id={f_id}"
-        res = requests.get(d_url)
-        return base64.b64encode(res.content).decode()
+        return base64.b64encode(requests.get(d_url).content).decode()
     except: return None
 
-# --- GIAO DIỆN ---
-tab_student, tab_admin = st.tabs(["📖 Học sinh", "⚙️ Quản lý"])
+# --- KIỂM TRA HẠN CHÓT ---
+now = datetime.now()
+deadline_dt = datetime.strptime(config["deadline"], "%Y-%m-%d %H:%M")
+is_expired = now > deadline_dt
+
+# --- GIAO DIỆN TABS ---
+tab_student, tab_admin = st.tabs(["📖 Khu vực Học sinh", "🔐 Quản lý Giáo viên"])
 
 with tab_admin:
     pwd = st.text_input("Mật khẩu Admin:", type="password")
-    if pwd == admin_pw:
-        st.success("Chào Nam!")
-        if st.button("🔄 Reset lượt nghe cả lớp"):
+    if pwd == config["admin_pw"]:
+        st.success("Xác thực thành công!")
+        st.write(f"⏰ Hạn chót hiện tại: `{config['deadline']}`")
+        if st.button("🔄 Reset toàn bộ lớp (Xóa sạch số lượt nghe)"):
             recs = sheet_data.get_all_records()
             for i in range(2, len(recs) + 2):
-                sheet_data.update_cell(i, 2, "FALSE")
+                sheet_data.update_cell(i, 2, "0") # Reset lượt nghe về 0
             st.rerun()
 
 with tab_student:
-    st.title("🎧 Bài tập nghe tự động")
-    records = sheet_data.get_all_records()
-    chua_nghe = [r["HoTen"] for r in records if str(r["DaNghe"]).upper() == "FALSE"]
-
-    if not chua_nghe:
-        st.success("🎉 Đã hoàn thành bài tập!")
+    if is_expired:
+        st.error(f"🔴 Đã quá hạn chót truy cập ({config['deadline']}). Vui lòng liên hệ thầy Nam.")
     else:
-        name = st.selectbox("Chọn tên của em:", ["-- Chọn tên --"] + chua_nghe)
-        if name != "-- Chọn tên --" and st.button("Bắt đầu bài thi"):
-            idx = [i for i, r in enumerate(records) if r["HoTen"] == name][0] + 2
-            sheet_data.update_cell(idx, 2, "TRUE")
-            st.session_state['user'] = name
-            
-            # Tải toàn bộ audio trước khi bắt đầu để tránh lag giữa chừng
-            with st.spinner("Đang chuẩn bị học liệu..."):
-                b64_list = []
-                for l in links:
-                    b64_list.append(get_audio_b64(l))
-                st.session_state['audios'] = b64_list
-            st.rerun()
+        st.title("🎧 Bài thi nghe tự động")
+        records = sheet_data.get_all_records()
+        
+        # Lọc học sinh chưa vượt quá số lần nghe cho phép (Cột B lưu số lần đã nghe)
+        list_hs = [r["HoTen"] for r in records if int(r["DaNghe"]) < config["max_repeats"]]
+        
+        if not list_hs:
+            st.warning("Hết lượt nghe hoặc danh sách trống.")
+        else:
+            name = st.selectbox("Chọn đúng tên để bắt đầu:", ["-- Chọn tên --"] + list_hs)
+            if name != "-- Chọn tên --" and st.button("Xác nhận & Tải bài"):
+                # Cập nhật số lần nghe (+1 vào cột B)
+                row_idx = [i for i, r in enumerate(records) if r["HoTen"] == name][0] + 2
+                current_count = int(records[row_idx-2]["DaNghe"])
+                sheet_data.update_cell(row_idx, 2, str(current_count + 1))
+                
+                with st.spinner("Đang mã hóa bài thi..."):
+                    st.session_state['audios'] = [get_audio_b64(l) for l in config["links"]]
+                    st.session_state['active_user'] = name
+                st.rerun()
 
-    if st.session_state.get('user') and st.session_state.get('audios'):
-        st.info(f"Học sinh: {st.session_state['user']}")
+    if st.session_state.get('active_user') and st.session_state.get('audios'):
+        # Chuẩn bị dữ liệu cho JS
+        js_data = {
+            "audios": st.session_state['audios'],
+            "speeds": config["speeds"],
+            "intervals": config["intervals"],
+            "total": len(config['links'])
+        }
         
-        # Chuyển list audio sang định dạng JSON để JavaScript đọc được
-        audios_json = json.dumps(st.session_state['audios'])
-        
-        # --- TRÌNH PHÁT TỰ ĐỘNG KHÔNG THỂ CAN THIỆP ---
         player_html = f"""
-        <div style="background:#f0f2f6; padding:20px; border-radius:15px; text-align:center; font-family:sans-serif;">
-            <h3 id="status">Sẵn sàng bắt đầu</h3>
-            <div style="width:100%; background:#ddd; height:10px; border-radius:5px; margin:15px 0;">
-                <div id="progress" style="width:0%; background:#28a745; height:10px; border-radius:5px; transition:width 0.1s;"></div>
+        <div style="background:#1a1a1a; color:white; padding:25px; border-radius:15px; text-align:center; font-family:sans-serif;">
+            <h2 id="status">Sẵn sàng bài thi</h2>
+            <div style="width:100%; background:#333; height:12px; border-radius:6px; margin:20px 0;">
+                <div id="prog" style="width:0%; background:#00ff00; height:12px; border-radius:6px; transition:width 0.1s;"></div>
             </div>
-            <p id="timer">File 1 / {len(links)}</p>
-            <button id="startBtn" onclick="startApp()" style="padding:15px 30px; background:#1a1a1a; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:bold;">
-                BẮT ĐẦU NGHE NGAY
-            </button>
-            <audio id="mainAudio"></audio>
+            <p id="info" style="color:#aaa;">File 1 / {js_data['total']}</p>
+            <button id="btn" onclick="start()" style="padding:15px 40px; background:#fff; color:#000; border:none; border-radius:30px; cursor:pointer; font-weight:bold; font-size:16px;">▶️ BẮT ĐẦU NGAY</button>
+            <audio id="player"></audio>
         </div>
 
         <script>
-            var audios = {audios_json};
-            var interval = {interval};
-            var currentIndex = 0;
-            var player = document.getElementById('mainAudio');
-            var startBtn = document.getElementById('startBtn');
-            var statusTxt = document.getElementById('status');
-            var progress = document.getElementById('progress');
-            var timerTxt = document.getElementById('timer');
-
-            function startApp() {{
-                startBtn.style.display = 'none';
-                playFile(0);
+            var data = {json.dumps(js_data)};
+            var audio = document.getElementById('player');
+            var btn = document.getElementById('btn');
+            
+            function start() {{
+                btn.style.display = 'none';
+                play(0);
             }}
 
-            function playFile(index) {{
-                if(index >= audios.length) {{
-                    statusTxt.innerText = "✅ Đã hoàn thành toàn bộ bài nghe!";
-                    progress.style.width = "100%";
+            function play(idx) {{
+                if(idx >= data.audios.length) {{
+                    document.getElementById('status').innerText = "✅ HOÀN THÀNH BÀI THI";
                     return;
                 }}
                 
-                currentIndex = index;
-                statusTxt.innerText = "🔊 Đang phát File " + (index + 1);
-                player.src = "data:audio/mp3;base64," + audios[index];
-                player.play();
+                document.getElementById('status').innerText = "🔊 Đang phát file " + (idx+1);
+                document.getElementById('info').innerText = "Tốc độ: " + (data.speeds[idx] || 1.0) + "x";
                 
-                // Cập nhật thanh tiến trình
-                player.ontimeupdate = function() {{
-                    var per = (player.currentTime / player.duration) * 100;
-                    progress.style.width = per + "%";
+                audio.src = "data:audio/mp3;base64," + data.audios[idx];
+                audio.playbackRate = data.speeds[idx] || 1.0;
+                audio.play();
+
+                audio.ontimeupdate = () => {{
+                    document.getElementById('prog').style.width = (audio.currentTime/audio.duration)*100 + "%";
                 }};
 
-                // Khi nghe xong 1 file
-                player.onended = function() {{
-                    if(index < audios.length - 1) {{
-                        startCooldown(interval, index + 1);
-                    }} else {{
-                        playFile(index + 1);
-                    }}
+                audio.onended = () => {{
+                    if(idx < data.audios.length - 1) {{
+                        let wait = data.intervals[idx] || 10;
+                        let timer = wait;
+                        document.getElementById('status').innerText = "⏳ Nghỉ giữa hiệp...";
+                        var cd = setInterval(() => {{
+                            document.getElementById('info').innerText = "File kế tiếp trong: " + timer + "s";
+                            timer--;
+                            if(timer < 0) {{
+                                clearInterval(cd);
+                                play(idx + 1);
+                            }}
+                        }}, 1000);
+                    }} else {{ play(idx + 1); }}
                 }};
-            }}
-
-            function startCooldown(seconds, nextIndex) {{
-                var timeLeft = seconds;
-                statusTxt.innerText = "⏳ Nghỉ giữa hiệp...";
-                progress.style.width = "0%";
-                
-                var countdown = setInterval(function() {{
-                    timerTxt.innerText = "Sẽ phát File " + (nextIndex + 1) + " sau: " + timeLeft + "s";
-                    timeLeft--;
-                    if(timeLeft < 0) {{
-                        clearInterval(countdown);
-                        timerTxt.innerText = "File " + (nextIndex + 1) + " / " + audios.length;
-                        playFile(nextIndex);
-                    }}
-                }}, 1000);
             }}
         </script>
         """
-        components.html(player_html, height=250)
+        components.html(player_html, height=300)
