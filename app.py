@@ -1,61 +1,66 @@
 import streamlit as st
 import streamlit.components.v1 as components
-import json
-import os
+import gspread
+from google.oauth2.service_account import Credentials
 
 # --- CẤU HÌNH GIAO DIỆN TỐI GIẢN ---
-st.set_page_config(page_title="Luyện nghe Tiếng Anh", page_icon="🎧")
+st.set_page_config(page_title="Luyện nghe Toán Tiếng Anh", page_icon="🎧")
 
+# Ẩn các thành phần thừa của Streamlit, giữ background tĩnh, phẳng
 hide_st_style = """
-            <style>
-            #MainMenu {visibility: hidden;}
-            footer {visibility: hidden;}
-            header {visibility: hidden;}
-            .stApp {background-color: #ffffff;}
-            </style>
-            """
+    <style>
+    #MainMenu {visibility: hidden;} 
+    footer {visibility: hidden;} 
+    header {visibility: hidden;} 
+    .stApp {background-color: #ffffff;}
+    </style>
+"""
 st.markdown(hide_st_style, unsafe_allow_html=True)
 
-st.title("🎧 Bài tập luyện nghe")
+st.title("🎧 Bài tập nghe: Introduction to Algebra")
 st.markdown("---")
 
-# --- HÀM 1: CHUYỂN ĐỔI LINK GOOGLE DRIVE ---
+# --- KẾT NỐI GOOGLE SHEETS ---
+@st.cache_resource
+def get_google_sheet():
+    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+    creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
+    client = gspread.authorize(creds)
+    
+    # THAY LINK GOOGLE SHEETS CỦA BẠN VÀO ĐÂY
+    sheet_url = "https://docs.google.com/spreadsheets/d/ID_FILE_SHEETS_CUA_BAN/edit"
+    return client.open_by_url(sheet_url).sheet1
+
+sheet = get_google_sheet()
+data_records = sheet.get_all_records()
+
+# Lọc những em chưa nghe (Cột DaNghe == "FALSE")
+hoc_sinh_chua_nghe = [row["HoTen"] for row in data_records if str(row["DaNghe"]).upper() == "FALSE"]
+
+if not hoc_sinh_chua_nghe:
+    st.success("🎉 Tất cả học sinh trong danh sách đã hoàn thành bài tập!")
+    st.stop()
+
+# --- HÀM PHÁT NHẠC TRỰC TIẾP ---
 def get_drive_direct_link(drive_url):
     if "drive.google.com/file/d/" in drive_url:
         file_id = drive_url.split("/file/d/")[1].split("/")[0]
         return f"https://drive.google.com/uc?export=download&id={file_id}"
     return drive_url 
 
-# --- HÀM 2: TRÌNH PHÁT BẢO MẬT ---
-def play_secure_media(direct_link, media_type="audio"):
-    if media_type == "video":
-        media_tag = f"""
-            <video id="myMedia" width="100%" style="pointer-events: none; border-radius: 8px;" oncontextmenu="return false;">
-                <source src="{direct_link}" type="video/mp4">
-            </video>
-        """
-    else:
-        media_tag = f"""
-            <audio id="myMedia">
-                <source src="{direct_link}" type="audio/mp3">
-            </audio>
-        """
-
+def play_secure_media(direct_link):
     html_code = f"""
         <div style="text-align: center; margin-top: 10px;">
-            {media_tag}
-            <br>
+            <audio id="myMedia"><source src="{direct_link}" type="audio/mp3"></audio>
             <button id="playBtn" onclick="startMedia()" 
                     style="padding: 12px 30px; font-size: 16px; cursor: pointer; background-color: #1a1a1a; color: white; border: none; border-radius: 4px; transition: 0.3s;">
                 ▶️ Bắt đầu nghe
             </button>
         </div>
-
         <script>
             function startMedia() {{
                 var media = document.getElementById("myMedia");
                 var btn = document.getElementById("playBtn");
-                
                 media.play();
                 btn.disabled = true;
                 btn.innerText = "⏳ Đang phát... Không thể tạm dừng!";
@@ -65,57 +70,33 @@ def play_secure_media(direct_link, media_type="audio"):
             }}
         </script>
     """
-    components.html(html_code, height=450 if media_type=="video" else 100)
-
-# --- QUẢN LÝ DANH SÁCH HỌC SINH (FILE JSON CHUNG) ---
-DB_FILE = "danh_sach.json"
-# Bạn điền tên học sinh của lớp vào danh sách này:
-DANH_SACH_GOC = ["Nguyễn Thành Nam", "Trần Thị B", "Lê Văn C", "Phạm Văn D"]
-
-def load_data():
-    # Nếu file chưa tồn tại (lần chạy đầu tiên), tạo mới danh sách với trạng thái False (chưa nghe)
-    if not os.path.exists(DB_FILE):
-        data = {ten: False for ten in DANH_SACH_GOC}
-        with open(DB_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False)
-        return data
-    # Nếu file đã có, đọc dữ liệu ra
-    with open(DB_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-def save_data(data):
-    # Lưu lại trạng thái mới nhất vào file
-    with open(DB_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False)
-
-data = load_data()
-
-# Lọc ra những học sinh có trạng thái là False (chưa nghe)
-hoc_sinh_chua_nghe = [ten for ten, da_nghe in data.items() if not da_nghe]
-
-if len(hoc_sinh_chua_nghe) == 0:
-    st.success("🎉 Tất cả học sinh trong lớp đã hoàn thành bài nghe!")
-    st.stop() # Dừng vẽ giao diện phía dưới
+    components.html(html_code, height=100)
 
 # --- GIAO DIỆN CHỌN TÊN ---
-st.write("Vui lòng chọn tên của em. **Lưu ý: Mỗi người chỉ được nghe 1 lần duy nhất.**")
+st.write("Vui lòng chọn tên để bắt đầu. **Lưu ý: Chỉ được nghe 1 lần duy nhất.**")
+
 chon_ten = st.selectbox("👤 Chọn tên:", ["-- Chọn tên --"] + hoc_sinh_chua_nghe)
 
-link_goc = "https://drive.google.com/file/d/1X2Y3Z_Vi_du_ID_cua_ban_4W5V/view?usp=sharing"
-direct_link = get_drive_direct_link(link_goc)
+# THAY LINK DRIVE CHỨA FILE AUDIO CỦA BẠN VÀO ĐÂY
+link_goc_drive = "https://drive.google.com/file/d/ID_FILE_AUDIO_CUA_BAN/view?usp=sharing"
+direct_link = get_drive_direct_link(link_goc_drive)
 
-# Xử lý logic khi bấm nút
-if chon_ten != "-- Chọn tên --":
-    if st.button("Xác nhận & Tải bài nghe"):
-        # 1. Cập nhật trạng thái thành True (Đã nghe) và lưu lại vào file JSON
-        data[chon_ten] = True
-        save_data(data)
+# --- XỬ LÝ LOGIC TRỪ LƯỢT VĨNH VIỄN ---
+if chon_ten != "-- Chọn tên --" and st.button("Xác nhận & Tải bài nghe"):
+    hs_info = next((item for item in data_records if item["HoTen"] == chon_ten), None)
+    
+    if hs_info:
+        # Vị trí dòng = index của list + 2 (do dòng 1 là tiêu đề trên Sheets)
+        row_index = data_records.index(hs_info) + 2 
         
-        # 2. Cấp quyền hiển thị Audio cho phiên làm việc hiện tại
+        # Cập nhật cột số 2 (DaNghe) thành TRUE
+        sheet.update_cell(row_index, 2, "TRUE")
+        
+        # Cấp quyền cho giao diện hiện tại
         st.session_state['duoc_nghe'] = True
-        st.rerun() # Tải lại trang ngay lập tức để tên biến mất khỏi Dropdown
+        st.rerun()
 
-# Chỉ hiển thị khối phát nhạc nếu đã được cấp quyền
+# --- HIỂN THỊ KHỐI ÂM THANH SAU KHI XÁC NHẬN ---
 if st.session_state.get('duoc_nghe', False):
-    st.info("⚠️ Đã tải dữ liệu thành công. Tuyệt đối không tải lại trang (F5) để tránh mất quyền nghe!")
-    play_secure_media(direct_link, media_type="audio")
+    st.info("⚠️ Đã tải dữ liệu. Tuyệt đối không tải lại trang (F5) để tránh mất quyền nghe!")
+    play_secure_media(direct_link)
