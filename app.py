@@ -15,7 +15,7 @@ def get_google_sheet():
     creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
     client = gspread.authorize(creds)
     # THAY LINK SHEETS CỦA BẠN VÀO ĐÂY
-    sheet_url = "https://docs.google.com/spreadsheets/d/ID_FILE_CUA_BAN/edit"
+    sheet_url = "https://docs.google.com/spreadsheets/d/1jw0qbjaTl9PqjR_cqncSBOXdsDezlNx86cRrBo8aG0U/edit?gid=0#gid=0"
     return client.open_by_url(sheet_url)
 
 gc = get_google_sheet()
