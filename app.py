@@ -11,11 +11,19 @@ from google.oauth2.service_account import Credentials
 
 st.set_page_config(page_title="Hệ Thống Học Online", layout="centered", page_icon="🏛️")
 # --- ẨN GIAO DIỆN MẶC ĐỊNH CỦA STREAMLIT ---
+# --- ẨN GIAO DIỆN MẶC ĐỊNH & NÚT CỦA STREAMLIT CLOUD ---
 hide_st_style = """
             <style>
+            /* Ẩn Menu mặc định */
             #MainMenu {visibility: hidden;}
-            header {visibility: hidden;}
+            /* Ẩn Footer */
             footer {visibility: hidden;}
+            /* Ẩn Header chứa khoảng trắng */
+            header {visibility: hidden;}
+            /* Ẩn nút Deploy (Chiếc thuyền đỏ) */
+            .stDeployButton {display: none !important;}
+            /* Ẩn cụm Toolbar chứa icon GitHub ở góc phải */
+            [data-testid="stToolbar"] {visibility: hidden !important;}
             </style>
             """
 st.markdown(hide_st_style, unsafe_allow_html=True)
