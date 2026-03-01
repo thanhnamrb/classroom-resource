@@ -4,11 +4,10 @@ import gspread
 import requests
 import base64
 import json
-import pandas as pd
 from datetime import datetime
 from google.oauth2.service_account import Credentials
 
-st.set_page_config(page_title="LMS - Hệ thống Luyện Nghe", layout="centered", page_icon="🎧")
+st.set_page_config(page_title="Hệ thống Luyện Nghe Tiếng Anh", layout="centered", page_icon="🎧")
 
 # --- KẾT NỐI GOOGLE SHEETS ---
 @st.cache_resource
@@ -26,9 +25,10 @@ try:
     sheet_sessions = gc.worksheet("Sessions")
     sheet_lich_su = gc.worksheet("LichSu")
 except Exception as e:
-    st.error(f"Lỗi: Không tìm thấy các Tab (DanhSach, Sessions, LichSu). {e}")
+    st.error(f"Lỗi: Không tìm thấy các Tab. {e}")
     st.stop()
 
+# --- HÀM TRỢ GIÚP ---
 def get_audio_b64(url):
     try:
         f_id = url.split("/d/")[1].split("/")[0]
@@ -41,24 +41,25 @@ def update_history(lop, name, session_name):
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     for i, r in enumerate(records):
         if str(r.get('Lop')) == str(lop) and str(r.get('HoTen')) == str(name) and str(r.get('TenSession')) == str(session_name):
-            row_idx = i + 2
-            new_count = int(r.get('SoLanNghe', 0)) + 1
-            sheet_lich_su.update_cell(row_idx, 4, str(new_count))
-            sheet_lich_su.update_cell(row_idx, 5, now_str)
-            return new_count
+            sheet_lich_su.update_cell(i + 2, 4, str(int(r.get('SoLanNghe', 0)) + 1))
+            sheet_lich_su.update_cell(i + 2, 5, now_str)
+            return
     sheet_lich_su.append_row([lop, name, session_name, "1", now_str])
-    return 1
 
-# --- LOAD DỮ LIỆU CHUNG ---
-try:
-    ds_records = sheet_danh_sach.get_all_records()
-    ss_records = sheet_sessions.get_all_records()
-    ls_records = sheet_lich_su.get_all_records()
-except:
-    ds_records, ss_records, ls_records = [], [], []
+def sync_data(sheet, records, headers):
+    sheet.clear()
+    if records:
+        sheet.update(values=[headers] + [[r.get(h, "") for h in headers] for r in records], range_name="A1")
+    else:
+        sheet.update(values=[headers], range_name="A1")
+
+# --- TẢI DỮ LIỆU ---
+ds_records = sheet_danh_sach.get_all_records()
+ss_records = sheet_sessions.get_all_records()
+ls_records = sheet_lich_su.get_all_records()
 
 # ==========================================================
-# KHU VỰC 1: GIAO DIỆN HỌC SINH (NỬA TRÊN)
+# KHU VỰC 1: GIAO DIỆN HỌC SINH 
 # ==========================================================
 st.title("🎧 Hệ Thống Làm Bài Nghe")
 st.markdown("---")
@@ -109,7 +110,7 @@ if chon_ten not in ["-- Chọn Tên --", "-- Chờ chọn Lớp --"]:
                     st.session_state['is_playing'] = True
                 st.rerun()
 
-# --- KHU VỰC PHÁT NHẠC HỌC SINH ---
+# --- TRÌNH PHÁT NHẠC ---
 if st.session_state.get('is_playing') and st.session_state.get('ss_info'):
     st.divider()
     ss = st.session_state['ss_info']
@@ -171,65 +172,100 @@ if st.session_state.get('is_playing') and st.session_state.get('ss_info'):
 
 
 # ==========================================================
-# KHU VỰC 2: CÁNH CỬA BÍ MẬT DÀNH CHO GIÁO VIÊN (NỬA DƯỚI)
+# KHU VỰC 2: APP QUẢN TRỊ DÀNH CHO GIÁO VIÊN
 # ==========================================================
-st.markdown("<br><br><br><br><br>", unsafe_allow_html=True) # Tạo khoảng trống
-
-with st.expander("🛠️ (Dành cho nội bộ)", expanded=False):
-    st.write("Khu vực quản trị hệ thống. Vui lòng xác thực.")
-    pwd = st.text_input("Mật mã:", type="password", key="admin_pwd")
+st.markdown("<br><br><br>", unsafe_allow_html=True)
+with st.expander("🔐 Trạm Quản Trị Giáo Viên", expanded=False):
+    pwd = st.text_input("Nhập mã truy cập:", type="password")
     
-    if pwd == "Nam2026": # Đổi mật khẩu của bạn ở đây
-        st.success("🔓 Đã mở khóa hệ thống quản trị!")
+    if pwd == "Nam2026":
+        st.success("Đăng nhập thành công! Chào mừng thầy Nam.")
         
-        tab_hs, tab_ss, tab_ls = st.tabs(["👥 QL Học Sinh", "⚙️ QL Bài Nghe (Session)", "📊 QL Lịch Sử"])
+        tab_tao, tab_lop, tab_rp = st.tabs(["📝 Soạn Bài (Sessions)", "👥 Quản Lý Học Sinh", "📊 Báo Cáo & Xóa Lượt"])
         
-        def save_to_sheet(sheet_obj, dataframe):
-            """Hàm lưu bảng pandas ngược lại vào Google Sheets"""
-            sheet_obj.clear()
-            sheet_obj.update(values=[dataframe.columns.values.tolist()] + dataframe.values.tolist(), range_name="A1")
+        # --- TAB 1: SOẠN BÀI NGHE ---
+        with tab_tao:
+            st.subheader("Tạo phiên nghe mới")
+            with st.form("form_session"):
+                s_name = st.text_input("Tên Bài Nghe (Session Name):", placeholder="VD: Test 1 - Algebra")
+                s_links = st.text_area("Link Google Drive (Cách nhau dấu phẩy):")
+                
+                c1, c2 = st.columns(2)
+                s_mode = c1.selectbox("Chế độ phát:", ["AUTO (Tự động chạy hết)", "MANUAL (Học sinh tự bấm)"])
+                s_pause = c2.checkbox("Cho phép tạm dừng (Pause)", value=False)
+                
+                c3, c4, c5 = st.columns(3)
+                s_interval = c3.number_input("Giây nghỉ (nếu AUTO):", min_value=0, value=10)
+                s_limit = c4.number_input("Lượt nghe tối đa:", min_value=1, value=1)
+                s_deadline = c5.text_input("Hạn chót (YYYY-MM-DD HH:MM):", value="2026-12-31 23:59")
+                
+                if st.form_submit_button("➕ Thêm Bài Nghe Này"):
+                    if s_name and s_links:
+                        new_ss = {"TenSession": s_name, "Links": s_links, "CheDo": s_mode.split()[0], "ChoPhepPause": str(s_pause), "ThoiGianNghi": s_interval, "LuotNgheToiDa": s_limit, "HanChot": s_deadline}
+                        ss_records.append(new_ss)
+                        sync_data(sheet_sessions, ss_records, ["TenSession", "Links", "CheDo", "ChoPhepPause", "ThoiGianNghi", "LuotNgheToiDa", "HanChot"])
+                        st.success(f"Đã tạo thành công bài: {s_name}")
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error("Vui lòng điền tên bài và link Drive!")
             
-        # --- TAB QUẢN LÝ HỌC SINH ---
-        with tab_hs:
-            st.write("Bạn có thể Thêm/Sửa/Xóa học sinh trực tiếp vào bảng dưới đây:")
-            df_hs = pd.DataFrame(ds_records) if ds_records else pd.DataFrame(columns=["Lop", "HoTen"])
-            edited_hs = st.data_editor(df_hs, num_rows="dynamic", use_container_width=True)
-            if st.button("💾 Lưu Danh Sách Học Sinh"):
-                with st.spinner("Đang đồng bộ lên Google Sheets..."):
-                    save_to_sheet(sheet_danh_sach, edited_hs)
-                st.success("Đã cập nhật danh sách lớp!")
+            st.divider()
+            st.write("**Các bài nghe đang hoạt động:**")
+            for ss in ss_records:
+                with st.container():
+                    colA, colB = st.columns([4, 1])
+                    colA.markdown(f"**{ss.get('TenSession')}** - Chế độ: `{ss.get('CheDo')}` - Lượt: `{ss.get('LuotNgheToiDa')}`")
+                    if colB.button("🗑️ Xóa", key=f"del_{ss.get('TenSession')}"):
+                        ss_records = [r for r in ss_records if r.get('TenSession') != ss.get('TenSession')]
+                        sync_data(sheet_sessions, ss_records, ["TenSession", "Links", "CheDo", "ChoPhepPause", "ThoiGianNghi", "LuotNgheToiDa", "HanChot"])
+                        st.rerun()
+
+        # --- TAB 2: QUẢN LÝ LỚP HỌC ---
+        with tab_lop:
+            st.subheader("Thêm học sinh mới")
+            with st.form("form_hs"):
+                c1, c2 = st.columns(2)
+                h_lop = c1.text_input("Tên Lớp (VD: Math-01):")
+                h_ten = c2.text_input("Họ và Tên:")
+                if st.form_submit_button("➕ Thêm Học Sinh"):
+                    if h_lop and h_ten:
+                        ds_records.append({"Lop": h_lop, "HoTen": h_ten})
+                        sync_data(sheet_danh_sach, ds_records, ["Lop", "HoTen"])
+                        st.success("Đã thêm!")
+                        time.sleep(1)
+                        st.rerun()
+            
+            st.write("---")
+            st.write("**Thêm nhanh nhiều học sinh (Bulk Add):**")
+            bulk_lop = st.text_input("Lớp sẽ được thêm vào:")
+            bulk_names = st.text_area("Dán danh sách tên (Mỗi người 1 dòng):")
+            if st.button("Tải danh sách lên"):
+                names = [n.strip() for n in bulk_names.split("\n") if n.strip()]
+                for n in names: ds_records.append({"Lop": bulk_lop, "HoTen": n})
+                sync_data(sheet_danh_sach, ds_records, ["Lop", "HoTen"])
+                st.success(f"Đã thêm {len(names)} học sinh vào lớp {bulk_lop}!")
                 time.sleep(1)
                 st.rerun()
 
-        # --- TAB QUẢN LÝ SESSION ---
-        with tab_ss:
-            st.write("Tạo bài nghe mới, cài đặt luật (AUTO/MANUAL, Pause, Nghỉ, Lượt tối đa...):")
-            df_ss = pd.DataFrame(ss_records) if ss_records else pd.DataFrame(columns=["TenSession", "Links", "CheDo", "ChoPhepPause", "ThoiGianNghi", "LuotNgheToiDa", "HanChot"])
-            edited_ss = st.data_editor(df_ss, num_rows="dynamic", use_container_width=True)
-            if st.button("💾 Lưu Cài Đặt Session"):
-                with st.spinner("Đang đồng bộ lên Google Sheets..."):
-                    save_to_sheet(sheet_sessions, edited_ss)
-                st.success("Đã cập nhật các Session bài nghe!")
-                time.sleep(1)
-                st.rerun()
-
-        # --- TAB QUẢN LÝ LỊCH SỬ ---
-        with tab_ls:
-            st.write("Bảng theo dõi số lần nghe. Bạn có thể xóa dòng để reset lượt nghe cho 1 học sinh.")
-            df_ls = pd.DataFrame(ls_records) if ls_records else pd.DataFrame(columns=["Lop", "HoTen", "TenSession", "SoLanNghe", "ThoiGianCuoi"])
-            edited_ls = st.data_editor(df_ls, num_rows="dynamic", use_container_width=True)
-            col_a, col_b = st.columns(2)
-            with col_a:
-                if st.button("💾 Lưu chỉnh sửa Lịch Sử"):
-                    with st.spinner("Đang đồng bộ..."):
-                        save_to_sheet(sheet_lich_su, edited_ls)
-                    st.success("Đã cập nhật lịch sử!")
-                    time.sleep(1)
-                    st.rerun()
-            with col_b:
-                if st.button("🚨 XÓA TRẮNG TOÀN BỘ LỊCH SỬ LỚP"):
-                    sheet_lich_su.clear()
-                    sheet_lich_su.update(values=[["Lop", "HoTen", "TenSession", "SoLanNghe", "ThoiGianCuoi"]], range_name="A1")
-                    st.warning("Đã reset toàn bộ lượt nghe của tất cả mọi người về 0.")
-                    time.sleep(1)
-                    st.rerun()
+        # --- TAB 3: BÁO CÁO & RESET LƯỢT ---
+        with tab_rp:
+            st.subheader("Lịch sử làm bài")
+            st.dataframe(ls_records, use_container_width=True) # Hiển thị bảng đẹp, chỉ đọc
+            
+            st.divider()
+            st.subheader("🛠️ Cấp lại quyền thi (Reset lượt)")
+            st.write("Nếu học sinh bị rớt mạng, bạn có thể xóa lịch sử bài thi đó để em ấy làm lại từ đầu.")
+            
+            c_lop = st.selectbox("Chọn Lớp:", [""] + list_lop, key="rs_lop")
+            if c_lop:
+                list_rs_ten = [str(r["HoTen"]) for r in ds_records if str(r.get("Lop")) == c_lop]
+                c_ten = st.selectbox("Chọn Học Sinh:", [""] + list_rs_ten, key="rs_ten")
+                if c_ten:
+                    c_bai = st.selectbox("Chọn Bài Cần Hủy Lượt:", [""] + list_ss, key="rs_bai")
+                    if c_bai and st.button("🚨 Hủy lượt bài này", type="primary"):
+                        ls_records = [r for r in ls_records if not (str(r.get('Lop')) == c_lop and str(r.get('HoTen')) == c_ten and str(r.get('TenSession')) == c_bai)]
+                        sync_data(sheet_lich_su, ls_records, ["Lop", "HoTen", "TenSession", "SoLanNghe", "ThoiGianCuoi"])
+                        st.success(f"Đã xóa lịch sử bài {c_bai} của em {c_ten}!")
+                        time.sleep(1)
+                        st.rerun()
