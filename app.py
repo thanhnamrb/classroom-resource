@@ -10,6 +10,15 @@ from datetime import datetime
 from google.oauth2.service_account import Credentials
 
 st.set_page_config(page_title="Hệ Thống Học Online", layout="centered", page_icon="🏛️")
+# --- ẨN GIAO DIỆN MẶC ĐỊNH CỦA STREAMLIT ---
+hide_st_style = """
+            <style>
+            #MainMenu {visibility: hidden;}
+            header {visibility: hidden;}
+            footer {visibility: hidden;}
+            </style>
+            """
+st.markdown(hide_st_style, unsafe_allow_html=True)
 
 # --- KẾT NỐI CƠ SỞ DỮ LIỆU ---
 @st.cache_resource
