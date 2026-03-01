@@ -324,7 +324,8 @@ st.markdown("<br><br><br>", unsafe_allow_html=True)
 with st.expander("🔐 Khu Vực Quản Trị Hệ Thống", expanded=False):
     pwd = st.text_input("Mã định danh Giảng viên:", type="password")
     
-    if pwd == "Nam2026":
+    # Truy xuất mật khẩu từ vùng an toàn của Streamlit
+    if pwd == st.secrets["ADMIN_PASSWORD"]: 
         st.success("Xác thực thành công.")
         
         tab_tao, tab_lop, tab_rp = st.tabs(["📝 Khởi Tạo Phiên Học", "👥 Quản Lý Học Viên", "📊 Dữ Liệu Truy Cập"])
